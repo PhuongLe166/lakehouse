@@ -1,0 +1,57 @@
+<?xml version="1.0"?>
+<configuration>
+  <!-- Warehouse mặc định trên MinIO -->
+  <property>
+    <name>hive.metastore.warehouse.dir</name>
+    <value>s3a://datalake/warehouse</value>
+  </property>
+
+  <!-- S3A connector tới MinIO -->
+  <property>
+    <name>fs.s3a.impl</name>
+    <value>org.apache.hadoop.fs.s3a.S3AFileSystem</value>
+  </property>
+  
+  <property>
+    <name>fs.s3a.endpoint</name>
+    <value>http://minio:9000</value>
+  </property>
+  
+  <property>
+    <name>fs.s3a.path.style.access</name>
+    <value>true</value>
+  </property>
+  
+  <property>
+    <name>fs.s3a.access.key</name>
+    <value>minioadmin</value>
+  </property>
+  
+  <property>
+    <name>fs.s3a.secret.key</name>
+    <value>minioadmin</value>
+  </property>
+
+  <!-- Disable SSL vì MinIO dùng HTTP -->
+  <property>
+    <name>fs.s3a.connection.ssl.enabled</name>
+    <value>false</value>
+  </property>
+
+  <!-- Tắt authorization provider gây lỗi -->
+  <property>
+    <name>hive.metastore.pre.event.listeners</name>
+    <value></value>
+  </property>
+
+  <property>
+    <name>hive.security.metastore.authorization.manager</name>
+    <value>org.apache.hadoop.hive.ql.security.authorization.plugin.sqlstd.SQLStdHiveAuthorizerFactory</value>
+  </property>
+
+  <!-- Cho phép tạo thư mục tự động -->
+  <property>
+    <name>hive.metastore.warehouse.external.dir</name>
+    <value>s3a://bronze-layer/delta</value>
+  </property>
+</configuration>

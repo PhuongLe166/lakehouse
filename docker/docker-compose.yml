@@ -1,0 +1,108 @@
+services:
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    env_file: ./.env
+    command: server /data --console-address ":${MINIO_CONSOLE_PORT:-9001}" --address ":9000"
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - ./data/minio:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio-setup:
+    image: minio/mc:latest
+    container_name: minio_mc_setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    env_file: ./.env
+    entrypoint: >
+      sh -c "
+      sleep 5 &&
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} &&
+      mc mb -p local/${MINIO_BUCKET} || true &&
+      mc mb -p local/${MINIO_BUCKET}/warehouse || true &&
+      mc mb -p local/bronze-layer || true &&
+      mc mb -p local/bronze-layer/delta || true &&
+      echo 'MinIO buckets ready'
+      "
+      
+  postgres:
+    image: postgres:15
+    container_name: metastore_db
+    environment:
+      - POSTGRES_DB=metastore_db
+      - POSTGRES_USER=hive
+      - POSTGRES_PASSWORD=hive
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hive -d metastore_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  hive-metastore:
+    image: apache/hive:4.0.0
+    container_name: hive-metastore
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      - SERVICE_NAME=metastore
+      - DB_DRIVER=postgres
+      - HIVE_CUSTOM_CONF_DIR=/hive_custom_conf
+      - HADOOP_HEAPSIZE=512
+      - HIVE_HEAPSIZE=512
+      - SERVICE_OPTS=-Xmx512m -Djavax.jdo.option.ConnectionDriverName=org.postgresql.Driver
+        -Djavax.jdo.option.ConnectionURL=jdbc:postgresql://metastore_db:5432/metastore_db
+        -Djavax.jdo.option.ConnectionUserName=hive
+        -Djavax.jdo.option.ConnectionPassword=hive
+    volumes:
+      - ./hive/conf:/hive_custom_conf:ro
+      - ./hive/jars/postgresql-42.7.4.jar:/opt/hive/lib/postgresql-42.7.4.jar:ro
+      - ./hive/jars/hadoop-aws-3.3.4.jar:/opt/hive/lib/hadoop-aws-3.3.4.jar:ro
+      - ./hive/jars/aws-java-sdk-bundle-1.12.262.jar:/opt/hive/lib/aws-java-sdk-bundle-1.12.262.jar:ro
+    ports:
+      - "9083:9083"
+
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9083'"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
+
+  trino:
+    image: trinodb/trino:latest
+    container_name: trino
+    depends_on:
+      hive-metastore:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./trino/etc/trino:/etc/trino
+      - ./trino/etc/catalog:/etc/trino/catalog
+      - ./hive/jars/hadoop-aws-3.3.4.jar:/usr/lib/trino/plugin/delta-lake/hadoop-aws-3.3.4.jar:ro
+      - ./hive/jars/aws-java-sdk-bundle-1.12.262.jar:/usr/lib/trino/plugin/delta-lake/aws-java-sdk-bundle-1.12.262.jar:ro
+
+networks:
+  default:
+    name: lakehouse_net
